@@ -46,7 +46,11 @@ const AutomationPage = () => {
 
     try {
       await window.electronAPI.task.create({
-        name: taskName || (taskType === 'fb_farm_reels' ? 'Farm Reels' : 'Auto Interact'),
+        name: taskName || (
+          taskType === 'fb_farm_reels' ? 'Farm Reels' : 
+          taskType === 'fb_add_friends_group' ? 'Auto Add Friends' :
+          taskType === 'fb_invite_to_group' ? 'Auto Invite Group' : 'Auto Interact'
+        ),
         type: taskType,
         profile_ids: Array.from(selectedProfiles),
         config
@@ -141,7 +145,10 @@ const AutomationPage = () => {
                 <tr key={task.id} className="border-b border-border/50 hover:bg-hover/50 transition-colors">
                   <td className="p-4 font-medium text-white">{task.name}</td>
                   <td className="p-4 text-muted">
-                    {task.type === 'fb_farm_reels' ? 'Farm Reels' : task.type === 'fb_auto_interact' ? 'Auto Interact' : task.type}
+                    {task.type === 'fb_farm_reels' ? 'Farm Reels' : 
+                     task.type === 'fb_add_friends_group' ? 'Add Friends' : 
+                     task.type === 'fb_invite_to_group' ? 'Invite Group' : 
+                     task.type === 'fb_auto_interact' ? 'Auto Interact' : task.type}
                   </td>
                   <td className="p-4 text-muted">{task.profile_ids.length} profiles</td>
                   <td className="p-4">
@@ -197,6 +204,8 @@ const AutomationPage = () => {
                   >
                     <option value="fb_auto_interact">Auto Interact (News Feed)</option>
                     <option value="fb_farm_reels">Farm Reels (Fanpage / Feed)</option>
+                    <option value="fb_add_friends_group">Auto Kết Bạn (Thành viên nhóm)</option>
+                    <option value="fb_invite_to_group">Auto Mời Bạn Bè (Vào nhóm mình)</option>
                   </select>
                 </div>
 
@@ -236,15 +245,17 @@ const AutomationPage = () => {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-medium text-muted uppercase tracking-wider mb-1">Custom Comments (One per line)</label>
-                  <textarea 
-                    value={comments} 
-                    onChange={e => setComments(e.target.value)} 
-                    className="w-full h-24 bg-dark border border-border rounded p-2 text-white outline-none focus:border-accent-blue transition-colors"
-                    placeholder="Enter comments..."
-                  />
-                </div>
+                {taskType !== 'fb_add_friends_group' && taskType !== 'fb_invite_to_group' && (
+                  <div>
+                    <label className="block text-xs font-medium text-muted uppercase tracking-wider mb-1">Custom Comments (One per line)</label>
+                    <textarea 
+                      value={comments} 
+                      onChange={e => setComments(e.target.value)} 
+                      className="w-full h-24 bg-dark border border-border rounded p-2 text-white outline-none focus:border-accent-blue transition-colors"
+                      placeholder="Enter comments..."
+                    />
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-xs font-medium text-muted uppercase tracking-wider mb-1">Select Profiles to Run</label>

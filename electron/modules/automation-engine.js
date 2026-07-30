@@ -99,6 +99,12 @@ class AutomationEngine {
           case 'fb_auto_interact':
              await this._taskFbAutoInteract(task, profileId, page, task.config);
              break;
+          case 'fb_add_friends_group':
+             await this._taskFbAddFriendsGroup(task, profileId, page, task.config);
+             break;
+          case 'fb_invite_to_group':
+             await this._taskFbInviteToGroup(task, profileId, page, task.config);
+             break;
           default:
             throw new Error(`Unknown task type: ${task.type}`);
         }
@@ -287,6 +293,130 @@ class AutomationEngine {
         // Randomly like or comment (higher chance than reels)
         await this._randomInteract(task, profileId, page, config, 0.4); // 40% chance
       }
+  }
+
+  async _taskFbAddFriendsGroup(task, profileId, page, config) {
+    let url = config.targetUrl;
+    if (!url || !url.includes('facebook.com/groups/')) {
+      throw new Error('Target URL is missing or not a valid Facebook Group URL');
+    }
+    
+    if (!url.includes('/members')) {
+      if (url.endsWith('/')) url += 'members';
+      else url += '/members';
+    }
+
+    this._log(task.id, profileId, 'action', 'pending', `Navigating to ${url}...`);
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await new Promise(r => setTimeout(r, 4000 + Math.random() * 2000));
+
+    let addedCount = 0;
+    let scrollAttempts = 0;
+
+    while (addedCount < config.actionCount && scrollAttempts < 20) {
+      // Find "Add friend" buttons
+      const addBtns = await page.locator('div[aria-label="Thêm bạn bè"], div[aria-label="Add friend"], span:has-text("Thêm bạn bè"), span:has-text("Add friend")');
+      const count = await addBtns.count();
+
+      let clickedInThisPass = false;
+      for (let i = 0; i < count; i++) {
+        if (addedCount >= config.actionCount) break;
+        try {
+          const btn = addBtns.nth(i);
+          if (await btn.isVisible()) {
+            await btn.click();
+            addedCount++;
+            clickedInThisPass = true;
+            this._log(task.id, profileId, 'action', 'success', `Sent friend request ${addedCount}/${config.actionCount}`);
+            // Wait 3 to 8 seconds to mimic human
+            await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
+          }
+        } catch (e) {
+          // Button might have disappeared or detached
+        }
+      }
+
+      if (!clickedInThisPass) {
+        await this._humanScroll(page, 2);
+        scrollAttempts++;
+      }
+    }
+    
+    this._log(task.id, profileId, 'complete', 'success', `Finished adding ${addedCount} friends.`);
+  }
+
+  async _taskFbInviteToGroup(task, profileId, page, config) {
+    let url = config.targetUrl;
+    if (!url || !url.includes('facebook.com/groups/')) {
+      throw new Error('Target URL is missing or not a valid Facebook Group URL');
+    }
+
+    this._log(task.id, profileId, 'action', 'pending', `Navigating to ${url}...`);
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await new Promise(r => setTimeout(r, 4000 + Math.random() * 2000));
+
+    // Try to find the "Invite" button on the group page
+    const inviteBtn = await page.locator('div[aria-label="Mời"], div[aria-label="Invite"], span:has-text("Mời"), span:has-text("Invite")').first();
+    if (await inviteBtn.isVisible()) {
+      await inviteBtn.click();
+      this._log(task.id, profileId, 'action', 'pending', 'Opened Invite dialog');
+      await new Promise(r => setTimeout(r, 3000));
+      
+      // Sometimes it opens a submenu "Mời bạn bè trên Facebook", we might need to click it
+      const inviteFbFriends = await page.locator('span:has-text("Mời bạn bè trên Facebook"), span:has-text("Invite Facebook friends")').first();
+      if (await inviteFbFriends.isVisible()) {
+        await inviteFbFriends.click();
+        await new Promise(r => setTimeout(r, 3000));
+      }
+
+      // Now we are in the dialog with a list of friends and checkboxes
+      let invitedCount = 0;
+      let scrollAttempts = 0;
+      
+      while (invitedCount < config.actionCount && scrollAttempts < 15) {
+        // Find checkboxes
+        const checkboxes = await page.locator('input[type="checkbox"]');
+        const count = await checkboxes.count();
+        let clickedInThisPass = false;
+
+        for (let i = 0; i < count; i++) {
+          if (invitedCount >= config.actionCount) break;
+          try {
+            const cb = checkboxes.nth(i);
+            const isChecked = await cb.isChecked().catch(() => true); // if error, assume checked to skip
+            if (await cb.isVisible() && !isChecked) {
+              await cb.click();
+              invitedCount++;
+              clickedInThisPass = true;
+              this._log(task.id, profileId, 'action', 'success', `Selected friend ${invitedCount}/${config.actionCount}`);
+              await new Promise(r => setTimeout(r, 1000 + Math.random() * 1500));
+            }
+          } catch (e) {
+            // ignore
+          }
+        }
+
+        if (!clickedInThisPass) {
+          // Try scrolling the dialog. It's tricky to scroll a specific div, so we'll simulate mouse wheel
+          await page.mouse.wheel({ deltaY: 500 });
+          await new Promise(r => setTimeout(r, 2000));
+          scrollAttempts++;
+        }
+      }
+
+      // Click "Send Invites" button
+      const sendBtn = await page.locator('div[aria-label="Gửi lời mời"], div[aria-label="Send Invites"], span:has-text("Gửi lời mời")').first();
+      if (await sendBtn.isVisible()) {
+        await sendBtn.click();
+        this._log(task.id, profileId, 'action', 'success', `Sent invites to ${invitedCount} friends.`);
+        await new Promise(r => setTimeout(r, 3000));
+      } else {
+        this._log(task.id, profileId, 'error', 'failed', 'Could not find Send button');
+      }
+
+    } else {
+      throw new Error('Could not find the Invite button on the group page');
+    }
   }
 
   async _taskFbAutoLike(taskId, profileId, page, config) {
