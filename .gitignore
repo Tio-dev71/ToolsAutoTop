@@ -1,0 +1,7 @@
+node_modules
+dist
+dist-electron
+.DS_Store
+*.log
+profiles/
+mkt-browser.db
