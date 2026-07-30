@@ -13,7 +13,7 @@ const DashboardPage = () => {
       if (browserStatuses[profile.id]?.status !== 'running') {
         const res = await window.electronAPI.browser.launch(profile.id);
         if (res && !res.success) {
-           showToast(`Failed to launch ${profile.name}: ${res.error}`, 'error');
+          showToast(`Failed to launch ${profile.name}: ${res.error}`, 'error');
         }
         // Stagger launches to prevent CPU spike
         await new Promise(r => setTimeout(r, 2000));
@@ -40,9 +40,9 @@ const DashboardPage = () => {
         <div className="no-drag-region">
           <h2 className="text-xl font-bold text-white">Live Dashboard</h2>
         </div>
-        
+
         <div className="flex items-center gap-4 no-drag-region">
-          <select 
+          <select
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             className="bg-dark border border-border text-sm rounded px-3 py-1.5 focus:outline-none focus:border-accent-blue"
@@ -52,7 +52,7 @@ const DashboardPage = () => {
             <option value="stopped">Stopped Only</option>
           </select>
 
-          <select 
+          <select
             value={gridSize}
             onChange={(e) => setGridSize(e.target.value)}
             className="bg-dark border border-border text-sm rounded px-3 py-1.5 focus:outline-none focus:border-accent-blue"
@@ -84,10 +84,10 @@ const DashboardPage = () => {
         ) : (
           <div className={`grid gap-4 ${gridSize}`}>
             {filteredProfiles.map(profile => (
-              <BrowserThumbnail 
-                key={profile.id} 
-                profile={profile} 
-                statusInfo={browserStatuses[profile.id]} 
+              <BrowserThumbnail
+                key={profile.id}
+                profile={profile}
+                statusInfo={browserStatuses[profile.id]}
               />
             ))}
           </div>
