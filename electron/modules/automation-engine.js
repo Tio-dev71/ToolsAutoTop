@@ -316,26 +316,34 @@ class AutomationEngine {
 
       while (addedCount < config.actionCount && scrollAttempts < 20) {
         if (!this.runningTasks.has(task.id)) break;
-
-        // Find "Add friend" buttons - checking different cases
-        const addBtns = await page.locator('div[aria-label="Thêm bạn bè"], div[aria-label="Add friend"], div[aria-label="Add Friend"], span:has-text("Thêm bạn bè"), span:has-text("Add friend"), span:has-text("Add Friend")');
-        const count = await addBtns.count();
-
+        
+        // Find "Add friend" buttons using valid Puppeteer selector and DOM evaluation
+        const btnSelector = '[aria-label*="Thêm bạn bè"], [aria-label*="Add friend"], [aria-label*="Add Friend"], span';
+        const btns = await page.$$(btnSelector);
+        
         let clickedInThisPass = false;
-        for (let i = 0; i < count; i++) {
+        for (const btn of btns) {
           if (addedCount >= config.actionCount || !this.runningTasks.has(task.id)) break;
-          try {
-            const btn = addBtns.nth(i);
-            if (await btn.isVisible()) {
+          
+          const isValid = await page.evaluate(el => {
+            const rect = el.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0 || rect.top < 0 || rect.bottom > (window.innerHeight || document.documentElement.clientHeight)) return false;
+            let aria = (el.getAttribute('aria-label') || '').toLowerCase().trim();
+            let text = (el.innerText || '').toLowerCase().trim();
+            return aria === 'thêm bạn bè' || aria === 'add friend' || text === 'thêm bạn bè' || text === 'add friend';
+          }, btn);
+
+          if (isValid) {
+            try {
               await btn.click();
               addedCount++;
               clickedInThisPass = true;
               this._log(task.id, profileId, 'action', 'success', `Sent friend request ${addedCount}/${config.actionCount} (Batch)`);
               // Wait 3 to 8 seconds to mimic human
               await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
+            } catch (e) {
+              // Ignore detached element errors
             }
-          } catch (e) {
-            // Button might have disappeared or detached
           }
         }
 
@@ -344,15 +352,15 @@ class AutomationEngine {
           scrollAttempts++;
         }
       }
-
+      
       if (!this.runningTasks.has(task.id)) break;
-
+      
       this._log(task.id, profileId, 'action', 'pending', `Finished a batch of ${addedCount}. Resting 5-10s before next batch...`);
       await new Promise(r => setTimeout(r, 5000 + Math.random() * 5000));
       // Scroll to get new members
       await this._humanScroll(page, 2);
     }
-
+    
     this._log(task.id, profileId, 'complete', 'success', `Task stopped by user.`);
   }
 
@@ -367,80 +375,129 @@ class AutomationEngine {
     await new Promise(r => setTimeout(r, 4000 + Math.random() * 2000));
 
     while (this.runningTasks.has(task.id)) {
-      // Try to find the "Invite" button on the group page
-      const inviteBtn = await page.locator('div[aria-label="Mời"], div[aria-label="Invite"], span:has-text("Mời"), span:has-text("Invite")').first();
-      if (await inviteBtn.isVisible()) {
-        await inviteBtn.click();
+      // Find and click the "Invite" button
+      const opened = await page.evaluate(() => {
+         const inviteSelectors = [
+           'div[aria-label="Mời"]', 
+           'div[aria-label="Invite"]',
+           'div[aria-label*="Mời tham gia"]',
+           'span'
+         ];
+         let allBtns = Array.from(document.querySelectorAll(inviteSelectors.join(', ')));
+         let inviteBtn = allBtns.find(el => {
+            let text = (el.innerText || '').toLowerCase();
+            let aria = (el.getAttribute('aria-label') || '').toLowerCase();
+            if ((text.includes('mời') || text.includes('invite') || aria.includes('mời') || aria.includes('invite')) && !text.includes('bạn bè trên facebook')) {
+               return el.getBoundingClientRect().width > 0;
+            }
+            return false;
+         });
+         
+         if (inviteBtn) {
+            const target = inviteBtn.closest('[role="button"]') || inviteBtn;
+            target.click();
+            return true;
+         }
+         return false;
+      });
+
+      if (opened) {
         this._log(task.id, profileId, 'action', 'pending', 'Opened Invite dialog');
         await new Promise(r => setTimeout(r, 3000));
-
-        // Sometimes it opens a submenu "Mời bạn bè trên Facebook", we might need to click it
-        const inviteFbFriends = await page.locator('span:has-text("Mời bạn bè trên Facebook"), span:has-text("Invite Facebook friends")').first();
-        if (await inviteFbFriends.isVisible()) {
-          await inviteFbFriends.click();
-          await new Promise(r => setTimeout(r, 3000));
-        }
+        
+        // Click "Invite Facebook friends" submenu if exists
+        await page.evaluate(() => {
+          let spans = Array.from(document.querySelectorAll('span'));
+          let subBtn = spans.find(span => span.innerText.includes('Mời bạn bè trên Facebook') || span.innerText.includes('Invite Facebook friends'));
+          if (subBtn) {
+             const target = subBtn.closest('[role="button"]') || subBtn;
+             target.click();
+          }
+        });
+        await new Promise(r => setTimeout(r, 3000));
 
         // Now we are in the dialog with a list of friends and checkboxes
         let invitedCount = 0;
         let scrollAttempts = 0;
-
+        
         while (invitedCount < config.actionCount && scrollAttempts < 15) {
           if (!this.runningTasks.has(task.id)) break;
-          // Find checkboxes (Facebook often uses div[role="checkbox"])
-          const checkboxes = await page.locator('input[type="checkbox"], div[role="checkbox"]');
-          const count = await checkboxes.count();
+          
+          const checkboxes = await page.$$('input[type="checkbox"], div[role="checkbox"]');
           let clickedInThisPass = false;
 
-          for (let i = 0; i < count; i++) {
+          for (const cb of checkboxes) {
             if (invitedCount >= config.actionCount || !this.runningTasks.has(task.id)) break;
-            try {
-              const cb = checkboxes.nth(i);
-              let isChecked = false;
-              // Check aria-checked first, fallback to isChecked
-              const ariaChecked = await cb.getAttribute('aria-checked');
-              if (ariaChecked !== null) {
-                isChecked = ariaChecked === 'true';
-              } else {
-                isChecked = await cb.isChecked().catch(() => true);
-              }
-
-              if (await cb.isVisible() && !isChecked) {
+            
+            const canCheck = await page.evaluate(el => {
+              const rect = el.getBoundingClientRect();
+              if (rect.width === 0 || rect.height === 0 || rect.top < 0 || rect.bottom > (window.innerHeight || document.documentElement.clientHeight)) return false;
+              const ariaChecked = el.getAttribute('aria-checked');
+              if (ariaChecked === 'true') return false;
+              if (el.tagName.toLowerCase() === 'input' && el.checked) return false;
+              return true;
+            }, cb);
+            
+            if (canCheck) {
+              try {
                 await cb.click();
                 invitedCount++;
                 clickedInThisPass = true;
                 this._log(task.id, profileId, 'action', 'success', `Selected friend ${invitedCount}/${config.actionCount} (Batch)`);
                 await new Promise(r => setTimeout(r, 1000 + Math.random() * 1500));
-              }
-            } catch (e) {
-              // ignore
+              } catch (e) {}
             }
           }
 
           if (!clickedInThisPass) {
-            // Simulate mouse wheel
-            await page.mouse.wheel({ deltaY: 500 });
+            // Scroll down
+            try {
+              if (page.mouse && page.mouse.wheel) {
+                await page.mouse.wheel({ deltaY: 500 });
+              } else {
+                await page.evaluate(() => {
+                  const dialog = document.querySelector('div[role="dialog"]');
+                  if (dialog) {
+                     const scrollable = dialog.querySelector('div[style*="overflow-y: auto"], div[style*="overflow-y: scroll"], div[class*="scroll"]') || dialog;
+                     scrollable.scrollTop += 500;
+                  }
+                });
+              }
+            } catch (e) {}
             await new Promise(r => setTimeout(r, 2000));
             scrollAttempts++;
           }
         }
 
-        // Click "Send Invites" button for this batch
-        const sendBtn = await page.locator('div[aria-label="Gửi lời mời"], div[aria-label="Send Invites"], span:has-text("Gửi lời mời")').first();
-        if (await sendBtn.isVisible()) {
-          await sendBtn.click();
+        // Click "Send Invites" button
+        const sent = await page.evaluate(() => {
+            let spans = Array.from(document.querySelectorAll('div[role="button"] span'));
+            let sendBtn = spans.find(span => {
+               let txt = (span.innerText || '').toLowerCase().trim();
+               return txt.includes('gửi lời mời') || txt.includes('send invites') || txt === 'gửi' || txt === 'send';
+            });
+            if (sendBtn) {
+               const target = sendBtn.closest('[role="button"]') || sendBtn;
+               target.click();
+               return true;
+            }
+            return false;
+        });
+
+        if (sent) {
           this._log(task.id, profileId, 'action', 'success', `Sent invites for batch of ${invitedCount}.`);
-          await new Promise(r => setTimeout(r, 3000));
         } else {
           this._log(task.id, profileId, 'error', 'failed', 'Could not find Send button, closing dialog via escape');
           await page.keyboard.press('Escape');
-          await new Promise(r => setTimeout(r, 2000));
         }
+        await new Promise(r => setTimeout(r, 3000));
 
       } else {
         this._log(task.id, profileId, 'error', 'failed', 'Could not find the Invite button on the group page');
+        // Wait a bit before retrying
+        await new Promise(r => setTimeout(r, 5000));
       }
-
+      
       if (!this.runningTasks.has(task.id)) break;
       this._log(task.id, profileId, 'action', 'pending', `Batch complete. Resting 5-10s...`);
       await new Promise(r => setTimeout(r, 5000 + Math.random() * 5000));
